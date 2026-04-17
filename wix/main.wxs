@@ -76,6 +76,16 @@
         <Directory Id='TARGETDIR' Name='SourceDir'>
             <Directory Id='LocalAppDataFolder'>
                 <Directory Id='APPLICATIONFOLDER' Name='Offline Dict CLI'>
+                    <Component Id='InstallRoot' Guid='0a8f7f9c-f3c2-4c76-9f63-14c34f655f04'>
+                        <RegistryValue
+                            Root='HKCU'
+                            Key='Software\jacobicao\OfflineDictCli'
+                            Name='InstallLocation'
+                            Type='string'
+                            Value='[APPLICATIONFOLDER]'
+                            KeyPath='yes'/>
+                        <RemoveFolder Id='RemoveApplicationFolder' On='uninstall'/>
+                    </Component>
                     
                     <!--
                       Enabling the license sidecar file in the installer is a four step process:
@@ -98,7 +108,14 @@
                     -->
 
                     <Directory Id='Bin' Name='bin'>
-                        <Component Id='Path' Guid='c27fff91-b79a-472e-8c23-3c1844b4a2a2' KeyPath='yes'>
+                        <Component Id='Path' Guid='c27fff91-b79a-472e-8c23-3c1844b4a2a2'>
+                            <RegistryValue
+                                Root='HKCU'
+                                Key='Software\jacobicao\OfflineDictCli'
+                                Name='PathConfigured'
+                                Type='integer'
+                                Value='1'
+                                KeyPath='yes'/>
                             <Environment
                                 Id='PATH'
                                 Name='PATH'
@@ -107,13 +124,21 @@
                                 Part='last'
                                 Action='set'
                                 System='no'/>
+                            <RemoveFolder Id='RemoveBinFolder' On='uninstall'/>
                         </Component>
-                        <Component Id='binary0' Guid='*'>
+                        <Component Id='binary0' Guid='4a9641fc-0f0e-4a7e-ab5a-6be801ca2d9d'>
                             <File
                                 Id='exe0'
                                 Name='dict.exe'
                                 DiskId='1'
                                 Source='$(var.CargoTargetBinDir)\dict.exe'
+                                KeyPath='no'/>
+                            <RegistryValue
+                                Root='HKCU'
+                                Key='Software\jacobicao\OfflineDictCli'
+                                Name='DictExeInstalled'
+                                Type='integer'
+                                Value='1'
                                 KeyPath='yes'/>
                         </Component>
                     </Directory>
@@ -137,6 +162,7 @@
             -->
             <!--<ComponentRef Id='License'/>-->
 
+            <ComponentRef Id='InstallRoot'/>
             <ComponentRef Id='binary0'/>
 
             <Feature

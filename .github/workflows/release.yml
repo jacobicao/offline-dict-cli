@@ -45,13 +45,13 @@ jobs:
           Compress-Archive -Path target/release/dict.exe -DestinationPath dist/dict-windows-x86_64.zip -Force
 
       - name: Build MSI installer
-        run: cargo wix
+        run: cargo wix --nocapture --output dist/dict-setup-x64.msi
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/dict-windows-x86_64.zip
+            dist/dict-setup-x64.msi
             target/release/dict.exe
-            target/wix/*.msi
           generate_release_notes: true
