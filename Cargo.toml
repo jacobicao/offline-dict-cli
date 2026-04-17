@@ -1,8 +1,15 @@
 [package]
 name = "offline_dict_cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 default-run = "dict"
+authors = ["jacobicao"]
+description = "A fast offline English-Chinese CLI dictionary for students."
+repository = "https://github.com/jacobicao/offline-dict-cli"
+homepage = "https://github.com/jacobicao/offline-dict-cli"
+
+[package.metadata.wix]
+eula = false
 
 [lib]
 name = "offline_dict_cli"

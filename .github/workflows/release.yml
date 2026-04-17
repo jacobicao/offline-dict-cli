@@ -35,11 +35,17 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
+      - name: Install cargo-wix
+        run: cargo install cargo-wix --locked
+
       - name: Package Windows archive
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Compress-Archive -Path target/release/dict.exe -DestinationPath dist/dict-windows-x86_64.zip -Force
+
+      - name: Build MSI installer
+        run: cargo wix
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -47,4 +53,5 @@ jobs:
           files: |
             dist/dict-windows-x86_64.zip
             target/release/dict.exe
+            target/wix/*.msi
           generate_release_notes: true
