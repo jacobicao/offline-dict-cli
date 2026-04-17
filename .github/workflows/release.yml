@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout vocabulary source
+        uses: actions/checkout@v4
+        with:
+          repository: KyleBing/english-vocabulary
+          path: external/english-vocabulary
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate embedded dataset
+        run: cargo run --bin generate_dataset -- "${{ github.workspace }}\\external\\english-vocabulary"
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Package Windows archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path target/release/dict.exe -DestinationPath dist/dict-windows-x86_64.zip -Force
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/dict-windows-x86_64.zip
+            target/release/dict.exe
+          generate_release_notes: true
