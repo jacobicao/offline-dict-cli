@@ -44,8 +44,8 @@ Primary goal: replace the "powerful but awkward" experience of generic offline d
 ```text
 dict <query>
 dict --all <query>
-dict log
-dict log --from 2026-04-10 --to 2026-04-17
+dict search-log
+dict search-log --from 2026-04-10 --to 2026-04-17
 dict --help
 dict --version
 ```
@@ -74,7 +74,7 @@ For English lookup:
 
 ```text
 abandon
-tags: CET4 CET6 TEM4 TEM8 GRE
+tags: CET4
 1. 放弃
 2. 遗弃
 3. 沉湎于
@@ -97,9 +97,18 @@ For simplified-Chinese lookup:
 
 - Default output shows at most 5 results
 - `--all` shows all exact-match results
-- English query prints tags once at the headword level
+- English query prints exactly one display tag, the lowest tag in the configured tag chain
 - Chinese query does not print tags by default
 - No spelling suggestions are shown on misses
+
+### CLI Parsing Rules
+
+- `search-log` is interpreted as a subcommand when it is the first positional token
+- `--all` only applies to lookup queries
+- `dict search-log --all` is an error
+- `dict --all search-log` is treated as a lookup query for the literal text `search-log`
+- `dict search-log` does not accept extra positional arguments
+- Invalid command combinations return standard CLI argument errors
 
 ### Error Handling
 
@@ -124,18 +133,20 @@ This feature is intentionally narrow:
 ### History Commands
 
 ```text
-dict log
-dict log --from 2026-04-10 --to 2026-04-17
+dict search-log
+dict search-log --from 2026-04-10 --to 2026-04-17
 ```
 
 ### History Query Rules
 
-- `dict log` defaults to the most recent 7 natural days, including today
+- `dict search-log` defaults to the most recent 7 natural days, including today
 - `--from` and `--to` must be provided together
 - Date format is `YYYY-MM-DD`
 - The date range is inclusive on both ends
 - Output is ordered from newest day to oldest day
 - Within each day, words are shown in first-query order
+- Runtime date uses the local system date
+- Tests must use an injected clock seam rather than wall-clock time
 
 ### History Recording Rules
 
@@ -144,6 +155,9 @@ dict log --from 2026-04-10 --to 2026-04-17
 - If the same normalized headword is queried again on the same day, do not write it again
 - English phrase lookups follow the same rule if the phrase exists as an English entry
 - Because the distributed dataset is currently words-only, v1 history will effectively contain words rather than phrases
+- In normal single-process use, history preserves first-query order within a day
+- Under concurrent multi-process writes, history is best effort; strict first-query ordering and perfect on-disk de-duplication are not guaranteed
+- History reads must de-duplicate repeated lines while preserving the first appearance in the file
 
 ### History Output
 
@@ -165,7 +179,7 @@ Output rules:
 
 - Always print each day in the requested range, even if there were no queries
 - Empty days print exactly `(no queries)`
-- `dict log` returns a success exit code even if the whole range is empty
+- `dict search-log` returns a success exit code even if the whole range is empty
 
 ### History Storage
 
@@ -178,6 +192,16 @@ On Windows, use:
 %LOCALAPPDATA%\offline-dict-cli\log\
 ```
 
+Allow an explicit override:
+
+```text
+OFFLINE_DICT_HISTORY_DIR
+```
+
+`OFFLINE_DICT_HISTORY_DIR` points directly to the directory that contains
+daily files such as `2026-04-18.txt`. It is not a higher-level root and must
+not have `log\` appended automatically.
+
 Store one plain-text file per day:
 
 ```text
@@ -189,11 +213,17 @@ Each file contains one normalized English headword per line.
 
 ### History Error Handling
 
-- `dict log --from <date>` without `--to` is an error
-- `dict log --to <date>` without `--from` is an error
+- `dict search-log --from <date>` without `--to` is an error
+- `dict search-log --to <date>` without `--from` is an error
 - Invalid date text is an error
 - `from > to` is an error
 - Failure to write history must not break a successful dictionary lookup; print a short warning to stderr and still return success for the lookup itself
+- A missing history directory is treated as empty history
+- A missing day file is treated as `(no queries)` for that day
+- Empty or malformed lines inside a readable day file are ignored
+- If `OFFLINE_DICT_HISTORY_DIR` points to a file instead of a directory, `dict search-log` returns an error
+- If the resolved history directory exists but is unreadable, `dict search-log` returns an error
+- If `%LOCALAPPDATA%` is unavailable and `OFFLINE_DICT_HISTORY_DIR` is not set, `dict search-log` returns an error
 
 ## Runtime Architecture
 
@@ -218,6 +248,26 @@ At runtime, the executable:
 6. Exits
 
 This keeps startup fast and distribution simple.
+
+### Runtime Command Model
+
+The runtime should parse arguments into an explicit command enum rather than
+handling behavior through ad hoc positional parsing.
+
+Suggested shape:
+
+- `Lookup { query, show_all }`
+- `SearchLog { from, to }`
+- `Help`
+- `Version`
+
+`SearchLog` must not load or parse the embedded dictionary dataset.
+
+Runtime execution should flow through a testable command runner that accepts:
+
+- resolved runtime paths and environment-derived configuration
+- a clock abstraction for current local date
+- the dictionary only for lookup commands
 
 ## Data Model
 
@@ -255,6 +305,11 @@ The tool should display these tags when an English word is queried:
 - Tags apply only to English headwords
 - Tag matching is exact at the normalized English headword level
 - Tags do not propagate through stemming, phrase splitting, or partial containment
+- The display priority chain is `COMMON_3500 < CET4 < CET6 < TEM4 < TEM8 < GRE`
+- English lookup displays only the lowest tag in that chain
+- `COMMON_3500` is a valid display tag and is the lowest display level
+- Runtime data must retain the full tag set for ranking and internal logic
+- User-facing display must use a separate derived display-tag path rather than overloading the full tag collection
 
 Examples:
 
@@ -374,10 +429,16 @@ Cover:
 - Automatic recording of successful English lookups
 - No history write for Chinese lookups
 - No history write for misses
-- `dict log` default 7-day range behavior
-- `dict log --from ... --to ...` range behavior
+- `dict search-log` default 7-day range behavior
+- `dict search-log --from ... --to ...` range behavior
 - Day-local de-duplication
 - Invalid date and invalid history-flag error cases
+- Missing-history-directory behavior
+- Invalid-history-directory behavior
+- History read tolerance for empty or malformed lines
+- Successful lookup with history-write warning behavior
+- Lowest-tag display behavior for English lookup
+- Chinese ranking remains based on the full tag set rather than the single display tag
 - Tag rendering correctness
 - Ranking correctness for Chinese-to-English output
 - Miss behavior and non-zero exit code
@@ -400,6 +461,7 @@ Preferred implementation stack:
 - Rust for the runtime CLI
 - Build-time scripts for dictionary and tag normalization
 - Embedded static data for the final executable
+- A small date library such as `chrono` for date parsing and day-range handling
 
 Why Rust:
 
@@ -407,6 +469,12 @@ Why Rust:
 - Good Windows CLI distribution story
 - Predictable startup behavior
 - Enough control for compact read-only embedded data structures
+
+### Runtime Implementation Notes
+
+- Centralize runtime environment parsing for dataset path and history path overrides
+- Prefer incremental day-file writes over full-file rewrites
+- A history write should read the current day file only as needed to decide whether an append is necessary
 
 ## Scope Guardrails for v1
 

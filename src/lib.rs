@@ -1,14 +1,22 @@
 use std::collections::HashMap;
+use std::env;
 use std::fmt;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::history::{
+    default_date_range, format_search_log, parse_date, resolve_history_dir, HistoryStore,
+};
 
 const DEFAULT_CHINESE_RESULTS: usize = 5;
 const EMBEDDED_DATASET: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_dictionary.json"));
 
+pub mod history;
 pub mod importer;
+
+pub use history::{Clock, SystemClock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tag {
@@ -74,6 +82,7 @@ pub struct LookupResult {
     pub kind: QueryKind,
     pub query: String,
     pub displayed_query: String,
+    pub display_tag: Option<Tag>,
     pub tags: Vec<Tag>,
     pub results: Vec<String>,
     pub total_results: usize,
@@ -101,6 +110,34 @@ struct EntryRecord {
     definitions: Vec<String>,
     tags: Vec<Tag>,
     best_priority: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    Lookup {
+        query: String,
+        show_all: bool,
+    },
+    SearchLog {
+        from: Option<String>,
+        to: Option<String>,
+    },
+    Help,
+    Version,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: u8,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuntimeConfig {
+    pub dataset_path: Option<PathBuf>,
+    pub history_dir: Option<PathBuf>,
+    pub local_app_data: Option<PathBuf>,
 }
 
 pub struct Dictionary {
@@ -192,6 +229,7 @@ impl Dictionary {
             kind: QueryKind::English,
             query: query.to_string(),
             displayed_query: entry.headword.clone(),
+            display_tag: lowest_display_tag(&entry.tags),
             tags: entry.tags.clone(),
             results: entry.definitions.clone(),
             total_results: entry.definitions.len(),
@@ -230,6 +268,7 @@ impl Dictionary {
             kind: QueryKind::Chinese,
             query: query.to_string(),
             displayed_query: query.to_string(),
+            display_tag: None,
             tags: Vec::new(),
             results,
             total_results,
@@ -237,18 +276,130 @@ impl Dictionary {
     }
 }
 
+pub fn parse_command<I, S>(args: I) -> Result<Command, String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let arguments: Vec<String> = args.into_iter().map(Into::into).collect();
+
+    if arguments.iter().any(|argument| argument == "--help") {
+        return Ok(Command::Help);
+    }
+
+    if arguments.iter().any(|argument| argument == "--version") {
+        return Ok(Command::Version);
+    }
+
+    let mut show_all = false;
+    let mut positionals = Vec::new();
+    let mut search_log_mode = false;
+    let mut from = None;
+    let mut to = None;
+    let mut index = 0;
+
+    while index < arguments.len() {
+        let argument = &arguments[index];
+        match argument.as_str() {
+            "--all" => {
+                if search_log_mode {
+                    return Err(unexpected_argument(argument));
+                }
+                show_all = true;
+                index += 1;
+            }
+            "--from" => {
+                if !search_log_mode {
+                    return Err(unexpected_argument(argument));
+                }
+                index += 1;
+                let Some(value) = arguments.get(index).cloned() else {
+                    return Err("error: missing value for '--from'".to_string());
+                };
+                from = Some(value);
+                index += 1;
+            }
+            "--to" => {
+                if !search_log_mode {
+                    return Err(unexpected_argument(argument));
+                }
+                index += 1;
+                let Some(value) = arguments.get(index).cloned() else {
+                    return Err("error: missing value for '--to'".to_string());
+                };
+                to = Some(value);
+                index += 1;
+            }
+            flag if flag.starts_with('-') => return Err(unexpected_argument(flag)),
+            "search-log" if positionals.is_empty() && !show_all && !search_log_mode => {
+                search_log_mode = true;
+                index += 1;
+            }
+            value => {
+                if search_log_mode {
+                    return Err(unexpected_argument(value));
+                }
+                positionals.push(value.to_string());
+                index += 1;
+            }
+        }
+    }
+
+    if search_log_mode {
+        if from.is_some() ^ to.is_some() {
+            return Err("error: --from and --to must be provided together".to_string());
+        }
+
+        return Ok(Command::SearchLog { from, to });
+    }
+
+    if positionals.is_empty() {
+        return Ok(Command::Help);
+    }
+
+    Ok(Command::Lookup {
+        query: positionals.join(" "),
+        show_all,
+    })
+}
+
+pub fn execute_command(
+    command: Command,
+    runtime: &RuntimeConfig,
+    clock: &dyn Clock,
+) -> Result<CommandOutput, String> {
+    match command {
+        Command::Help => Ok(CommandOutput {
+            stdout: help_text(),
+            stderr: String::new(),
+            exit_code: 0,
+        }),
+        Command::Version => Ok(CommandOutput {
+            stdout: format!("{}\n", version_text()),
+            stderr: String::new(),
+            exit_code: 0,
+        }),
+        Command::Lookup { query, show_all } => execute_lookup(query, show_all, runtime, clock),
+        Command::SearchLog { from, to } => execute_search_log(from, to, runtime, clock),
+    }
+}
+
+pub fn runtime_config_from_env() -> RuntimeConfig {
+    RuntimeConfig {
+        dataset_path: env::var_os("OFFLINE_DICT_DATASET").map(PathBuf::from),
+        history_dir: env::var_os("OFFLINE_DICT_HISTORY_DIR").map(PathBuf::from),
+        local_app_data: env::var_os("LOCALAPPDATA").map(PathBuf::from),
+    }
+}
+
 pub fn format_result(result: &LookupResult, show_all: bool) -> String {
     let mut lines = Vec::new();
     lines.push(result.displayed_query.clone());
 
-    if matches!(result.kind, QueryKind::English) && !result.tags.is_empty() {
-        let tags = result
-            .tags
-            .iter()
-            .map(|tag| tag.label())
-            .collect::<Vec<_>>()
-            .join(" ");
-        lines.push(format!("tags: {tags}"));
+    if matches!(result.kind, QueryKind::English) {
+        if let Some(tag) = result.display_tag {
+            lines.push(format!("tags: {}", tag.label()));
+        }
     }
 
     for (index, item) in result.results.iter().enumerate() {
@@ -272,7 +423,7 @@ pub fn format_result(result: &LookupResult, show_all: bool) -> String {
 
 pub fn help_text() -> String {
     format!(
-        "Usage:\n  dict [--all] <query>\n  dict --help\n  dict --version\n\nVersion:\n  {}\n",
+        "Usage:\n  dict [--all] <query>\n  dict search-log\n  dict search-log --from YYYY-MM-DD --to YYYY-MM-DD\n  dict --help\n  dict --version\n\nVersion:\n  {}\n",
         env!("CARGO_PKG_VERSION")
     )
 }
@@ -281,11 +432,117 @@ pub fn version_text() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+fn execute_lookup(
+    query: String,
+    show_all: bool,
+    runtime: &RuntimeConfig,
+    clock: &dyn Clock,
+) -> Result<CommandOutput, String> {
+    let dictionary = load_dictionary(runtime.dataset_path.as_deref())?;
+
+    match dictionary.lookup(&query, show_all) {
+        Ok(result) => {
+            let mut stderr = String::new();
+
+            if matches!(result.kind, QueryKind::English) {
+                if let Err(error) = record_lookup_history(runtime, clock, &result.displayed_query) {
+                    stderr = format!("warning: failed to record history: {error}\n");
+                }
+            }
+
+            Ok(CommandOutput {
+                stdout: format!("{}\n", format_result(&result, show_all)),
+                stderr,
+                exit_code: 0,
+            })
+        }
+        Err(LookupError::EmptyQuery) => Ok(CommandOutput {
+            stdout: help_text(),
+            stderr: String::new(),
+            exit_code: 0,
+        }),
+        Err(LookupError::NotFound { .. }) => Ok(CommandOutput {
+            stdout: format!("未找到精确匹配: {query}\n"),
+            stderr: String::new(),
+            exit_code: 1,
+        }),
+    }
+}
+
+fn execute_search_log(
+    from: Option<String>,
+    to: Option<String>,
+    runtime: &RuntimeConfig,
+    clock: &dyn Clock,
+) -> Result<CommandOutput, String> {
+    let history_store = history_store_from_config(runtime)?;
+    let (from_date, to_date) = resolve_search_log_range(from.as_deref(), to.as_deref(), clock)?;
+    let days = history_store.read_range(from_date, to_date)?;
+
+    Ok(CommandOutput {
+        stdout: format_search_log(&days),
+        stderr: String::new(),
+        exit_code: 0,
+    })
+}
+
+fn history_store_from_config(runtime: &RuntimeConfig) -> Result<HistoryStore, String> {
+    let directory = resolve_history_dir(
+        runtime.history_dir.as_deref(),
+        runtime.local_app_data.as_deref(),
+    )?;
+    Ok(HistoryStore::new(directory))
+}
+
+fn record_lookup_history(
+    runtime: &RuntimeConfig,
+    clock: &dyn Clock,
+    headword: &str,
+) -> Result<(), String> {
+    let history_store = history_store_from_config(runtime)?;
+    history_store.record_lookup(clock.today_local(), headword)
+}
+
+fn resolve_search_log_range(
+    from: Option<&str>,
+    to: Option<&str>,
+    clock: &dyn Clock,
+) -> Result<(chrono::NaiveDate, chrono::NaiveDate), String> {
+    match (from, to) {
+        (None, None) => Ok(default_date_range(clock)),
+        (Some(from), Some(to)) => {
+            let from_date = parse_date(from)?;
+            let to_date = parse_date(to)?;
+            if from_date > to_date {
+                return Err("error: from date must be on or before to date".to_string());
+            }
+            Ok((from_date, to_date))
+        }
+        _ => Err("error: --from and --to must be provided together".to_string()),
+    }
+}
+
+fn load_dictionary(dataset_path: Option<&Path>) -> Result<Dictionary, String> {
+    if let Some(path) = dataset_path {
+        return Dictionary::from_json_path(path);
+    }
+
+    Dictionary::embedded()
+}
+
+fn unexpected_argument(argument: &str) -> String {
+    format!("error: unexpected argument '{argument}' found")
+}
+
 fn best_tag_priority(tags: &[Tag]) -> usize {
     tags.iter()
         .map(|tag| tag.priority())
         .min()
         .unwrap_or(usize::MAX)
+}
+
+fn lowest_display_tag(tags: &[Tag]) -> Option<Tag> {
+    tags.iter().copied().min_by_key(|tag| tag.priority())
 }
 
 pub(crate) fn normalize_tags(tags: Vec<Tag>) -> Vec<Tag> {
@@ -331,7 +588,7 @@ fn normalize_chinese(input: &str) -> String {
     input.split_whitespace().collect::<Vec<_>>().join("")
 }
 
-fn contains_chinese(input: &str) -> bool {
+pub(crate) fn contains_chinese(input: &str) -> bool {
     input.chars().any(is_cjk_unified_ideograph)
 }
 

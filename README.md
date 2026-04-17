@@ -19,7 +19,7 @@
 dict abandon
 
 abandon
-tags: CET4 CET6
+tags: CET4
 1. 放任
 2. 狂热
 3. 遗弃
@@ -49,6 +49,18 @@ dict 放弃
 dict --all 放弃
 ```
 
+看最近 7 天查过哪些英文词：
+
+```text
+dict search-log
+```
+
+看指定日期范围：
+
+```text
+dict search-log --from 2026-04-10 --to 2026-04-17
+```
+
 ## 这个工具适合谁
 
 - 喜欢简单工具的学生
@@ -62,8 +74,9 @@ dict --all 放弃
 - 单文件分发：下载一个 `dict.exe` 就能用
 - 启动快：不是数据库程序，也不需要初始化
 - 结果直接：精确匹配，不猜你想查什么
-- 英文带标签：方便判断是不是常见词、四六级词
+- 英文带标签：只显示最低等级的一个标签，方便快速判断难度
 - 中文反查可排序：更常见、更考试向的词会靠前
+- 自动记录英文查词历史：可以回看最近几天查过什么词
 
 ## 当前规则
 
@@ -73,6 +86,8 @@ dict --all 放弃
 - 中文查询：按简体中文释义精确匹配
 - 默认最多显示 5 条中文反查结果
 - `--all` 可以显示全部结果
+- `dict search-log` 默认显示最近 7 天每天查过哪些英文词
+- 只记录成功的英文查询，不记录中文反查和未命中查询
 - 没找到时会输出 `未找到精确匹配: <query>`
 
 也就是说：
@@ -120,6 +135,8 @@ dict apple
 ```text
 dict <query>
 dict --all <query>
+dict search-log
+dict search-log --from YYYY-MM-DD --to YYYY-MM-DD
 dict --help
 dict --version
 ```
@@ -131,6 +148,12 @@ dict --version
 - `COMMON_3500`
 - `CET4`
 - `CET6`
+
+显示规则是：
+
+- 英文查询时，只显示最低等级的一个标签
+- 例如同时命中 `COMMON_3500` 和 `CET4`，只显示 `COMMON_3500`
+- 中文反查排序仍会利用完整标签集合
 
 代码层面已经预留了更多标签位，但如果词源里没有对应数据，就不会显示出来。README 这里按当前真实情况写，不做超额承诺。
 
@@ -212,6 +235,7 @@ target/wix/
 ```text
 src/main.rs
 src/lib.rs
+src/history.rs
 src/importer.rs
 src/bin/generate_dataset.rs
 tests/
@@ -221,7 +245,8 @@ build.rs
 大致分工：
 
 - `src/main.rs`：CLI 入口
-- `src/lib.rs`：查询引擎、格式化、数据加载
+- `src/lib.rs`：查询引擎、命令执行、格式化、数据加载
+- `src/history.rs`：查词历史的读写、日期范围和格式化
 - `src/importer.rs`：把外部词库清洗成可内置的数据
 - `src/bin/generate_dataset.rs`：本地生成 `dictionary.json`
 - `build.rs`：构建时把本地生成的数据嵌进最终二进制

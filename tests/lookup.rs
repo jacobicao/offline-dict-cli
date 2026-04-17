@@ -53,6 +53,7 @@ fn english_lookup_is_case_insensitive_and_formats_tags() {
     assert_eq!(result.kind, QueryKind::English);
     assert_eq!(result.displayed_query, "abandon");
     assert_eq!(result.tags, vec![Tag::Cet4, Tag::Cet6]);
+    assert_eq!(result.display_tag, Some(Tag::Cet4));
     assert_eq!(
         result.results,
         vec!["放弃".to_string(), "遗弃".to_string(), "沉湎于".to_string()]
@@ -61,7 +62,7 @@ fn english_lookup_is_case_insensitive_and_formats_tags() {
 
     assert_eq!(
         format_result(&result, false),
-        "abandon\ntags: CET4 CET6\n1. 放弃\n2. 遗弃\n3. 沉湎于"
+        "abandon\ntags: CET4\n1. 放弃\n2. 遗弃\n3. 沉湎于"
     );
 }
 
@@ -75,8 +76,25 @@ fn english_phrase_lookup_is_exact() {
 
     assert_eq!(result.kind, QueryKind::English);
     assert_eq!(result.displayed_query, "give up");
+    assert_eq!(result.display_tag, None);
     assert!(result.tags.is_empty());
     assert_eq!(result.results, vec!["放弃".to_string()]);
+}
+
+#[test]
+fn common_3500_is_the_lowest_display_tag() {
+    let dictionary = sample_dictionary();
+
+    let result = dictionary
+        .lookup("quit", false)
+        .expect("lookup should work");
+
+    assert_eq!(result.tags, vec![Tag::Common3500]);
+    assert_eq!(result.display_tag, Some(Tag::Common3500));
+    assert_eq!(
+        format_result(&result, false),
+        "quit\ntags: COMMON_3500\n1. 放弃"
+    );
 }
 
 #[test]
@@ -89,6 +107,7 @@ fn chinese_lookup_is_ranked_and_truncated_by_default() {
 
     assert_eq!(result.kind, QueryKind::Chinese);
     assert_eq!(result.displayed_query, "放弃");
+    assert_eq!(result.display_tag, None);
     assert!(result.tags.is_empty());
     assert_eq!(
         result.results,
