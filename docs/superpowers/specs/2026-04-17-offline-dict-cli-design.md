@@ -44,6 +44,8 @@ Primary goal: replace the "powerful but awkward" experience of generic offline d
 ```text
 dict <query>
 dict --all <query>
+dict log
+dict log --from 2026-04-10 --to 2026-04-17
 dict --help
 dict --version
 ```
@@ -105,6 +107,94 @@ For simplified-Chinese lookup:
 - Empty input: print short help
 - Invalid flags: standard CLI error output
 
+## Query History
+
+The tool should automatically keep a lightweight local history of successful
+English lookups.
+
+This feature is intentionally narrow:
+
+- Only successful English exact-match lookups are recorded
+- Chinese reverse lookups are not recorded
+- Misses are not recorded
+- History is local-only and per-user
+- History is grouped by day
+- Within one day, each normalized English headword appears at most once
+
+### History Commands
+
+```text
+dict log
+dict log --from 2026-04-10 --to 2026-04-17
+```
+
+### History Query Rules
+
+- `dict log` defaults to the most recent 7 natural days, including today
+- `--from` and `--to` must be provided together
+- Date format is `YYYY-MM-DD`
+- The date range is inclusive on both ends
+- Output is ordered from newest day to oldest day
+- Within each day, words are shown in first-query order
+
+### History Recording Rules
+
+- A successful English lookup records the normalized English headword
+- Normalization uses the same lowercase and whitespace-normalization rule as English lookup
+- If the same normalized headword is queried again on the same day, do not write it again
+- English phrase lookups follow the same rule if the phrase exists as an English entry
+- Because the distributed dataset is currently words-only, v1 history will effectively contain words rather than phrases
+
+### History Output
+
+Example default output:
+
+```text
+2026-04-18
+1. abandon
+2. apple
+
+2026-04-17
+(no queries)
+
+2026-04-16
+1. persist
+```
+
+Output rules:
+
+- Always print each day in the requested range, even if there were no queries
+- Empty days print exactly `(no queries)`
+- `dict log` returns a success exit code even if the whole range is empty
+
+### History Storage
+
+Store history outside the executable directory in the current user's local app
+data directory.
+
+On Windows, use:
+
+```text
+%LOCALAPPDATA%\offline-dict-cli\log\
+```
+
+Store one plain-text file per day:
+
+```text
+2026-04-18.txt
+2026-04-17.txt
+```
+
+Each file contains one normalized English headword per line.
+
+### History Error Handling
+
+- `dict log --from <date>` without `--to` is an error
+- `dict log --to <date>` without `--from` is an error
+- Invalid date text is an error
+- `from > to` is an error
+- Failure to write history must not break a successful dictionary lookup; print a short warning to stderr and still return success for the lookup itself
+
 ## Runtime Architecture
 
 The final distributed artifact is one executable:
@@ -121,10 +211,11 @@ Two phases exist conceptually:
 At runtime, the executable:
 
 1. Parses CLI arguments
-2. Determines whether the query is Chinese or English
-3. Looks up the built-in read-only dictionary data
-4. Formats results
-5. Exits
+2. Either executes a history query or determines whether the lookup query is Chinese or English
+3. Looks up the built-in read-only dictionary data when needed
+4. Records the successful English lookup in local history when applicable
+5. Formats results
+6. Exits
 
 This keeps startup fast and distribution simple.
 
@@ -280,6 +371,13 @@ Cover:
 - Chinese exact lookup
 - Default top-5 truncation
 - `--all` expansion
+- Automatic recording of successful English lookups
+- No history write for Chinese lookups
+- No history write for misses
+- `dict log` default 7-day range behavior
+- `dict log --from ... --to ...` range behavior
+- Day-local de-duplication
+- Invalid date and invalid history-flag error cases
 - Tag rendering correctness
 - Ranking correctness for Chinese-to-English output
 - Miss behavior and non-zero exit code
@@ -325,6 +423,9 @@ v1 must remain intentionally small. Do not add:
 - plugin architecture
 - user dictionaries
 - runtime hot reload of data
+- cross-device sync for history
+- query-count statistics
+- per-query timestamps in user-facing output
 
 ## Open Follow-Up Items
 
