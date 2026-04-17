@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use offline_dict_cli::importer::{
-    build_persisted_dictionary, load_source_documents_from_directory,
+    build_persisted_dictionary, load_source_documents_from_directory, summarize_source_documents,
 };
 
 fn main() -> ExitCode {
@@ -40,6 +40,7 @@ fn run() -> Result<String, String> {
     }
 
     let documents = load_source_documents_from_directory(&PathBuf::from(&source_root))?;
+    let summary = summarize_source_documents(&documents);
     let persisted = build_persisted_dictionary(&documents);
     let json = serde_json::to_vec(&persisted)
         .map_err(|error| format!("failed to serialize dataset: {error}"))?;
@@ -61,8 +62,11 @@ fn run() -> Result<String, String> {
     })?;
 
     Ok(format!(
-        "generated {} entries into {}",
-        persisted.entries.len(),
+        "generated {} headwords, ignored {} multi-word headwords, ignored {} phrases, {} exact-query keys into {}",
+        summary.unique_headwords,
+        summary.ignored_multi_word_headwords,
+        summary.ignored_unique_phrases,
+        summary.total_exact_query_keys,
         output_path.display()
     ))
 }

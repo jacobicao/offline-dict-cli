@@ -43,12 +43,23 @@ struct EntryAccumulator {
     tags: Vec<Tag>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceSummary {
+    pub unique_headwords: usize,
+    pub ignored_unique_phrases: usize,
+    pub ignored_multi_word_headwords: usize,
+    pub total_exact_query_keys: usize,
+}
+
 pub fn build_persisted_dictionary(documents: &[SourceDocument]) -> PersistedDictionary {
     let mut entries_by_headword: BTreeMap<String, EntryAccumulator> = BTreeMap::new();
 
     for document in documents {
         for entry in &document.entries {
             let headword = normalize_english(&entry.word);
+            if is_multi_word_headword(&headword) {
+                continue;
+            }
             let definitions = entry
                 .translations
                 .iter()
@@ -61,15 +72,6 @@ pub fn build_persisted_dictionary(documents: &[SourceDocument]) -> PersistedDict
                 definitions,
                 document.tag.into_iter().collect(),
             );
-
-            for phrase in &entry.phrases {
-                push_entry(
-                    &mut entries_by_headword,
-                    normalize_english(&phrase.phrase),
-                    split_translation(&phrase.translation),
-                    Vec::new(),
-                );
-            }
         }
     }
 
@@ -121,6 +123,43 @@ pub fn load_source_documents_from_directory(root: &Path) -> Result<Vec<SourceDoc
     }
 
     Ok(documents)
+}
+
+pub fn summarize_source_documents(documents: &[SourceDocument]) -> SourceSummary {
+    let mut unique_headwords = BTreeMap::new();
+    let mut ignored_unique_phrases = BTreeMap::new();
+    let mut ignored_multi_word_headwords = BTreeMap::new();
+
+    for document in documents {
+        for entry in &document.entries {
+            let headword = normalize_english(&entry.word);
+            if !headword.is_empty() {
+                if is_multi_word_headword(&headword) {
+                    ignored_multi_word_headwords.insert(headword, ());
+                } else {
+                    unique_headwords.insert(headword, ());
+                }
+            }
+
+            for phrase in &entry.phrases {
+                let normalized_phrase = normalize_english(&phrase.phrase);
+                if !normalized_phrase.is_empty() {
+                    ignored_unique_phrases.insert(normalized_phrase, ());
+                }
+            }
+        }
+    }
+
+    SourceSummary {
+        unique_headwords: unique_headwords.len(),
+        ignored_unique_phrases: ignored_unique_phrases.len(),
+        ignored_multi_word_headwords: ignored_multi_word_headwords.len(),
+        total_exact_query_keys: unique_headwords.len(),
+    }
+}
+
+fn is_multi_word_headword(headword: &str) -> bool {
+    headword.contains(' ')
 }
 
 fn push_entry(

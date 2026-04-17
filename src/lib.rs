@@ -6,7 +6,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CHINESE_RESULTS: usize = 5;
-const EMBEDDED_DATASET: &str = include_str!("../data/generated/dictionary.json");
+const EMBEDDED_DATASET: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_dictionary.json"));
 
 pub mod importer;
 
