@@ -190,7 +190,9 @@ git clone https://github.com/KyleBing/english-vocabulary.git
 ### 2. 生成本地数据
 
 ```powershell
+$env:OFFLINE_DICT_ALLOW_EMPTY_DATASET = "1"
 cargo run --bin generate_dataset -- D:\git\english-vocabulary
+Remove-Item Env:OFFLINE_DICT_ALLOW_EMPTY_DATASET
 ```
 
 这一步会在本地生成：
@@ -200,6 +202,7 @@ data/generated/dictionary.json
 ```
 
 这个文件只作为本地构建输入，不需要提交到仓库。
+环境变量只用于允许第一次生成数据时临时空词库启动；后续正常编译不需要设置。
 
 ### 3. 编译 release
 

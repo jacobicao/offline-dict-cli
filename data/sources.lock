@@ -1,0 +1,7 @@
+meaning_source.repository=https://github.com/KyleBing/english-vocabulary.git
+meaning_source.ref=8814e02b40f69a2a6e016dbde087010304fcedfc
+meaning_source.path=json
+meaning_source.files=1-初中-顺序.json,2-高中-顺序.json,3-CET4-顺序.json,4-CET6-顺序.json,5-考研-顺序.json,6-托福-顺序.json,7-SAT-顺序.json
+tag_source.common_3500=1-初中-顺序.json
+tag_source.cet4=3-CET4-顺序.json
+tag_source.cet6=4-CET6-顺序.json
