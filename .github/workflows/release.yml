@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+env:
+  VOCABULARY_SOURCE_REPOSITORY: KyleBing/english-vocabulary
+  VOCABULARY_SOURCE_REF: 8814e02b40f69a2a6e016dbde087010304fcedfc
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -20,7 +24,8 @@ jobs:
       - name: Checkout vocabulary source
         uses: actions/checkout@v4
         with:
-          repository: KyleBing/english-vocabulary
+          repository: ${{ env.VOCABULARY_SOURCE_REPOSITORY }}
+          ref: ${{ env.VOCABULARY_SOURCE_REF }}
           path: external/english-vocabulary
 
       - name: Install Rust toolchain
@@ -30,7 +35,45 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Generate embedded dataset
+        env:
+          OFFLINE_DICT_ALLOW_EMPTY_DATASET: "1"
         run: cargo run --bin generate_dataset -- "${{ github.workspace }}\\external\\english-vocabulary"
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run tests
+        run: cargo test -j 1
+
+      - name: Audit generated dataset
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+
+          $sourceCommit = git -C external/english-vocabulary rev-parse HEAD
+          $json = Get-Content -Raw -LiteralPath data/generated/dictionary.json | ConvertFrom-Json
+          $entries = $json.entries
+          $tagCounts = @{}
+
+          foreach ($entry in $entries) {
+            foreach ($tag in $entry.tags) {
+              $tagCounts[$tag] = 1 + ($tagCounts[$tag] ?? 0)
+            }
+          }
+
+          $tagSummary = ($tagCounts.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ", "
+          $withTags = ($entries | Where-Object { $_.tags.Count -gt 0 }).Count
+          $audit = @(
+            "source_repository=${{ env.VOCABULARY_SOURCE_REPOSITORY }}"
+            "source_ref=${{ env.VOCABULARY_SOURCE_REF }}"
+            "source_commit=$sourceCommit"
+            "entries=$($entries.Count)"
+            "with_tags=$withTags"
+            "untagged=$($entries.Count - $withTags)"
+            "tag_counts=$tagSummary"
+          ) -join "`n"
+
+          $audit | Tee-Object -FilePath dist/dataset-audit.txt
 
       - name: Build release binary
         run: cargo build --release
@@ -53,5 +96,6 @@ jobs:
           files: |
             dist/dict-windows-x86_64.zip
             dist/dict-setup-x64.msi
+            dist/dataset-audit.txt
             target/release/dict.exe
           generate_release_notes: true

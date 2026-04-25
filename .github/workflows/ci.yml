@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  VOCABULARY_SOURCE_REPOSITORY: KyleBing/english-vocabulary
+  VOCABULARY_SOURCE_REF: 8814e02b40f69a2a6e016dbde087010304fcedfc
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout vocabulary source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.VOCABULARY_SOURCE_REPOSITORY }}
+          ref: ${{ env.VOCABULARY_SOURCE_REF }}
+          path: external/english-vocabulary
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate embedded dataset
+        env:
+          OFFLINE_DICT_ALLOW_EMPTY_DATASET: "1"
+        run: cargo run --bin generate_dataset -- "${{ github.workspace }}\\external\\english-vocabulary"
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run tests
+        run: cargo test -j 1
